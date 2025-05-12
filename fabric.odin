@@ -21,16 +21,12 @@ Triangle :: struct {
 	area:      f32,
 }
 
-CreateMesh :: proc(
-	height: f32,
-	width: f32,
-	rows: i32,
-	columns: i32,
-	color: rl.Color,
-) -> (
-	[]Particle,
-	[]Triangle,
-) {
+Cloth :: struct {
+	particles: []Particle,
+	triangles: []Triangle,
+}
+
+CreateMesh :: proc(height: f32, width: f32, rows: i32, columns: i32, color: rl.Color) -> Cloth {
 	particles := make([]Particle, int(rows * columns))
 	triangles := make([]Triangle, int((rows - 1) * (columns - 1) * 2))
 
@@ -81,7 +77,7 @@ CreateMesh :: proc(
 		}
 	}
 
-	return particles, triangles
+	return Cloth{particles = particles, triangles = triangles}
 }
 
 main :: proc() {
@@ -90,7 +86,9 @@ main :: proc() {
 
 	meshHeight, meshWidth: f32 = 5.0, 5.0
 	rows, columns: i32 = 10, 10
-	particles, triangles := CreateMesh(meshHeight, meshWidth, rows, columns, rl.BLUE)
+	cloth := CreateMesh(meshHeight, meshWidth, rows, columns, rl.BLUE)
+  particles := cloth.particles
+  triangles := cloth.triangles
 
 	meshCenter := rl.Vector3{0, meshHeight / 2, 0}
 
