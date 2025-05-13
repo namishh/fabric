@@ -3,11 +3,10 @@ package fabric
 import math "core:math"
 import rl "vendor:raylib"
 
-// simple particle
 Particle :: struct {
 	position:    rl.Vector3,
 	velocity:    rl.Vector3,
-	forced:      rl.Vector3,
+	force:       rl.Vector3,
 	mass:        f32,
 	inverseMass: f32,
 	fixed:       bool,
@@ -21,10 +20,217 @@ Triangle :: struct {
 	area:      f32,
 }
 
-Cloth :: struct {
-	particles: []Particle,
-	triangles: []Triangle,
+SpringType :: enum {
+	Structural,
+	Stretch,
+	Bend,
 }
+
+Spring :: struct {
+	particleA:      i32,
+	particleB:      i32,
+	restLength:     f32,
+	stiffness:      f32,
+	damping:        f32,
+	maxStretch:     f32,
+	maxCompression: f32,
+	t:              SpringType,
+}
+
+// bend elements
+BendElement :: struct {
+	particleA:  i32,
+	particleB:  i32,
+	particleC:  i32,
+	particleD:  i32,
+	restAngle:  f32,
+	stiffness:  f32,
+	damping:    f32,
+	edgeVector: rl.Vector3,
+}
+
+Cloth :: struct {
+	particles:    []Particle,
+	triangles:    []Triangle,
+	springs:      []Spring,
+	bendElements: []BendElement,
+}
+
+CreateSprings :: proc(cloth: ^Cloth, rows: i32, columns: i32) {
+	structuralSprings := (rows - 1) * columns + rows * (columns - 1)
+	shearSprings := (rows - 1) * (columns - 1) * 2
+	bendSprings := (rows - 2) * columns + rows * (columns - 2)
+	cloth.springs = make([]Spring, int(structuralSprings + shearSprings + bendSprings))
+
+	springIndex := 0
+
+	for row in 0 ..< rows {
+		for col in 0 ..< columns {
+			index := row * columns + col
+
+			if col < columns - 1 {
+				restLength := rl.Vector3Distance(
+					cloth.particles[index].position,
+					cloth.particles[index + 1].position,
+				)
+
+				cloth.springs[index] = Spring {
+					particleA  = index,
+					particleB  = index + 1,
+					restLength = restLength,
+					stiffness  = 0.5,
+					damping    = 0.1,
+					t          = .Structural,
+				}
+
+				springIndex += 1
+			}
+
+
+			if row < rows - 1 {
+				restLength := rl.Vector3Distance(
+					cloth.particles[index].position,
+					cloth.particles[index + columns].position,
+				)
+
+				cloth.springs[springIndex] = Spring {
+					particleA      = i32(index),
+					particleB      = i32(index + columns),
+					restLength     = restLength,
+					stiffness      = 1000.0,
+					damping        = 10.0,
+					maxStretch     = restLength * 1.1,
+					maxCompression = restLength * 0.9,
+					t              = .Structural,
+				}
+
+				springIndex += 1
+			}
+		}
+	}
+
+	for row in 0 ..< rows - 1 {
+		for col in 0 ..< columns - 1 {
+			index := row * columns + col
+
+			restLength1 := rl.Vector3Distance(
+				cloth.particles[index].position,
+				cloth.particles[index + columns + 1].position,
+			)
+
+			cloth.springs[springIndex] = Spring {
+				particleA      = i32(index),
+				particleB      = i32(index + columns + 1),
+				restLength     = restLength1,
+				stiffness      = 800.0,
+				damping        = 8.0,
+				maxStretch     = restLength1 * 1.15,
+				maxCompression = restLength1 * 0.85,
+				t              = .Stretch,
+			}
+			springIndex += 1
+
+			restLength2 := rl.Vector3Distance(
+				cloth.particles[index + 1].position,
+				cloth.particles[index + columns].position,
+			)
+
+			cloth.springs[springIndex] = Spring {
+				particleA      = i32(index + 1),
+				particleB      = i32(index + columns),
+				restLength     = restLength2,
+				stiffness      = 800.0,
+				damping        = 8.0,
+				maxStretch     = restLength2 * 1.15,
+				maxCompression = restLength2 * 0.85,
+				t              = .Stretch,
+			}
+			springIndex += 1
+		}
+	}
+
+	for row in 0 ..< rows {
+		for col in 0 ..< columns {
+			index := row * columns + col
+
+			if col < columns - 2 {
+				restLength := rl.Vector3Distance(
+					cloth.particles[index].position,
+					cloth.particles[index + 2].position,
+				)
+
+				cloth.springs[springIndex] = Spring {
+					particleA      = i32(index),
+					particleB      = i32(index + 2),
+					restLength     = restLength,
+					stiffness      = 300.0, 
+					damping        = 5.0,
+					maxStretch     = restLength * 1.2,
+					maxCompression = restLength * 0.8,
+					t              = .Bend,
+				}
+				springIndex += 1
+			}
+
+			if row < rows - 2 {
+				restLength := rl.Vector3Distance(
+					cloth.particles[index].position,
+					cloth.particles[index + columns * 2].position,
+				)
+
+				cloth.springs[springIndex] = Spring {
+					particleA      = i32(index),
+					particleB      = i32(index + columns * 2),
+					restLength     = restLength,
+					stiffness      = 300.0, 
+					damping        = 5.0,
+					maxStretch     = restLength * 1.2,
+					maxCompression = restLength * 0.8,
+					t              = .Bend,
+				}
+				springIndex += 1
+			}
+		}
+	}
+}
+
+// BEND ELEMENTS
+CalculateDihedralAngle :: proc(p1, p2, p3, p4: rl.Vector3) -> f32 {
+    v21 := p2 - p1
+    v31 := p3 - p1
+    v41 := p4 - p1
+    
+		n1 := rl.Vector3CrossProduct(v21, v31)
+    n1 = rl.Vector3Normalize(n1)
+    
+    n2 := rl.Vector3CrossProduct(v41, v21)
+    n2 = rl.Vector3Normalize(n2)
+    
+    cosAngle := rl.Vector3DotProduct(n1, n2)
+    
+    if cosAngle > 1.0 do cosAngle = 1.0
+    if cosAngle < -1.0 do cosAngle = -1.0
+    
+    angle := math.acos(cosAngle)
+    
+    e := rl.Vector3Normalize(v21)
+    if rl.Vector3DotProduct(rl.Vector3CrossProduct(n1, n2), e) < 0 {
+        angle = -angle
+    }
+    
+    return angle
+}
+
+FixFirstRow :: proc(cloth: ^Cloth, columns: i32) {
+    for col in 0..<columns {
+        cloth.particles[col].fixed = true
+    }
+}
+
+CreateBendElements :: proc(cloth: ^Cloth, rows: i32, columns: i32) {
+
+}
+
 
 CreateMesh :: proc(height: f32, width: f32, rows: i32, columns: i32, color: rl.Color) -> Cloth {
 	particles := make([]Particle, int(rows * columns))
@@ -40,7 +246,7 @@ CreateMesh :: proc(height: f32, width: f32, rows: i32, columns: i32, color: rl.C
 			particles[index] = Particle {
 				position    = rl.Vector3{xPos, yPos, zPos},
 				velocity    = rl.Vector3{0, 0, 0},
-				forced      = rl.Vector3{0, 0, 0},
+				force       = rl.Vector3{0, 0, 0},
 				mass        = 1.0,
 				inverseMass = 1.0,
 				fixed       = (col == 0 || col == columns - 1),
@@ -87,8 +293,8 @@ main :: proc() {
 	meshHeight, meshWidth: f32 = 5.0, 5.0
 	rows, columns: i32 = 10, 10
 	cloth := CreateMesh(meshHeight, meshWidth, rows, columns, rl.BLUE)
-  particles := cloth.particles
-  triangles := cloth.triangles
+	particles := cloth.particles
+	triangles := cloth.triangles
 
 	meshCenter := rl.Vector3{0, meshHeight / 2, 0}
 
